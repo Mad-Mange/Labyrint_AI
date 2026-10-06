@@ -42,3 +42,12 @@ def test_training_writes_live_files(tmp_path):
     assert len(xs) == 2 and all(y >= 0 for y in ys)      # losses exist after the first update
     assert json.loads((tmp_path / "live.json").read_text())["steps"] == 192
     assert not log.poll()                                  # nothing new
+
+
+def test_run_level_reads_args_json(tmp_path):
+    from labyrint.agent import run_level
+
+    assert run_level(tmp_path) is None and run_level(tmp_path / "best_model.zip") is None
+    (tmp_path / "args.json").write_text(json.dumps({"level": "pinnar", "steps": 1e6}))
+    assert run_level(tmp_path) == "pinnar"
+    assert run_level(tmp_path / "best_model.zip") == "pinnar"   # a model saved in the run folder

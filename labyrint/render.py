@@ -13,6 +13,7 @@ import pygame
 import pygame.gfxdraw
 
 from .game import LabyrinthGame, Status
+from .lang import t
 from .level import Level
 
 LIGHT = (-0.6, -0.8)  # light comes from the top left, shadows fall to the bottom right
@@ -401,20 +402,21 @@ class Renderer:
         x0 = self.outer_w + 24
         right = self.width - 24
         y = 22
-        title = self.f_title.render("LABYRINT", True, ACCENT)
+        title = self.f_title.render(t("LABYRINT"), True, ACCENT)
         screen.blit(title, (x0, y))
         y += title.get_height()
-        screen.blit(self.f_small.render(f"Bana: {self.level.name}", True, PANEL_DIM), (x0, y))
+        screen.blit(self.f_small.render(t("Bana: {name}").format(name=t(self.level.name)), True, PANEL_DIM),
+                    (x0, y))
         y += 40
 
         st = game.state
         n_holes = len(self.level.holes)
         rows = [
-            ("Tid", f"{st.time:5.1f} s"),
-            ("Hål passerade", f"{st.holes_passed} / {n_holes}"),
-            ("Försök", str(hud.attempts)),
-            ("Bästa tid", f"{hud.best_time:.1f} s" if hud.best_time is not None else "–"),
-            ("Rekord", f"{hud.best_holes} hål"),
+            (t("Tid"), f"{st.time:5.1f} s"),
+            (t("Hål passerade"), f"{st.holes_passed} / {n_holes}"),
+            (t("Försök"), str(hud.attempts)),
+            (t("Bästa tid"), f"{hud.best_time:.1f} s" if hud.best_time is not None else "–"),
+            (t("Rekord"), t("{n} hål").format(n=hud.best_holes)),
         ]
         for label, value in rows:
             screen.blit(self.f_text.render(label, True, PANEL_DIM), (x0, y))
@@ -432,22 +434,23 @@ class Renderer:
         y += 34
 
         # the two knobs, turned according to the current tilt
-        for i, (label, value) in enumerate((("X-ratt", st.tilt[0]), ("Y-ratt", st.tilt[1]))):
+        for i, (label, value) in enumerate(((t("X-ratt"), st.tilt[0]), (t("Y-ratt"), st.tilt[1]))):
             cx = x0 + 52 + i * 140
             cy = y + 38
             self._draw_knob(screen, cx, cy, value)
-            t = self.f_small.render(label, True, PANEL_DIM)
-            screen.blit(t, t.get_rect(center=(cx, cy + 50)))
+            img = self.f_small.render(label, True, PANEL_DIM)
+            screen.blit(img, img.get_rect(center=(cx, cy + 50)))
         y += 112
 
-        screen.blit(self.f_text.render(f"Styrs av: {hud.controller}", True, PANEL_TEXT), (x0, y))
+        controller = t("Styrs av: {controller}").format(controller=t(hud.controller))
+        screen.blit(self.f_text.render(controller, True, PANEL_TEXT), (x0, y))
         y += 32
         for line in hud.info.splitlines():
             screen.blit(self.f_small.render(line, True, PANEL_DIM), (x0, y))
             y += 21
         y += 8
 
-        message = "PAUS – tryck P" if hud.paused else hud.message
+        message = t("PAUS – tryck P") if hud.paused else hud.message
         color = ACCENT if hud.paused else hud.message_color
         for line in self._wrap(message, self.f_big, right - x0):
             img = self.f_big.render(line, True, color)
@@ -455,13 +458,13 @@ class Renderer:
             y += img.get_height()
 
         help_lines = [
-            "Mus: luta brädet",
-            "Pilar/WASD: vrid rattarna",
-            "Mellanslag: plant bräde",
-            "R: börja om    P: paus",
-            "F1: visa AI-sensorer",
-            "F2: växla autopilot / AI",
-            "Esc: avsluta",
+            t("Mus: luta brädet"),
+            t("Pilar/WASD: vrid rattarna"),
+            t("Mellanslag: plant bräde"),
+            t("R: börja om    P: paus"),
+            t("F1: visa AI-sensorer"),
+            t("F2: växla autopilot / AI"),
+            t("Esc: avsluta"),
         ]
         y = self.height - 22 - len(help_lines) * 21
         for line in help_lines:

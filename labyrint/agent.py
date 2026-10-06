@@ -34,6 +34,16 @@ def latest_run(runs: Path = RUNS) -> Path | None:
     return max(started, key=lambda p: p.stat().st_mtime).parent if started else None
 
 
+def run_level(run_or_model: str | Path) -> str | None:
+    """The level a training run used, from the args.json in the run folder (or next to a
+    model saved in it). None if unknown, e.g. for a model copied to models/."""
+    p = Path(run_or_model)
+    try:
+        return json.loads(((p if p.is_dir() else p.parent) / "args.json").read_text())["level"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def load_model(path: str | Path, device: str = "cpu"):
     """Load a stable-baselines3 model without knowing which algorithm trained it."""
     from stable_baselines3 import PPO, SAC
@@ -123,12 +133,12 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description="Run a trained model headless and measure it.")
     ap.add_argument("model", nargs="?", default=str(DEFAULT_MODEL))
-    ap.add_argument("--level", default="classic")
+    ap.add_argument("--level", default=None, help="default: the level the model's run trained on, else classic")
     ap.add_argument("--episodes", type=int, default=10)
     ap.add_argument("--jitter", type=float, default=2.0, help="random start offset (mm)")
     args = ap.parse_args()
 
-    game = LabyrinthGame(args.level, seed=0)
+    game = LabyrinthGame(args.level or run_level(args.model) or "classic", seed=0)
     pilot = NeuralPilot(args.model)
     wins, times = 0, []
     t0 = time.perf_counter()

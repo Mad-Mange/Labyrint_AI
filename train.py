@@ -29,7 +29,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from labyrint.agent import write_live_snapshot
-from labyrint.autopilot import BASELINE_SECONDS as AUTOPILOT_SECONDS
+from labyrint.autopilot import baseline_seconds
 from labyrint.env import LabyrinthEnv
 from labyrint.vecenv import BatchedSubprocVecEnv
 
@@ -239,8 +239,10 @@ def main() -> None:
     else:
         model = build_model(args.algo, venv, args, str(ROOT / "runs"))
 
+    baseline = baseline_seconds(args.level)
     print(f"Tränar {args.algo.upper()} på '{args.level}' med {args.envs} miljöer i {args.steps / 1e6:g} M steg "
-          f"({model.device}). Autopiloten klarar banan på ca {AUTOPILOT_SECONDS:.0f} s.", flush=True)
+          f"({model.device}). " + (f"Autopiloten klarar banan på ca {baseline:.0f} s." if baseline
+                                   else "Autopiloten klarar inte banan!"), flush=True)
     callback = EvalCallback(out, args.level, int(args.eval_freq), args.eval_episodes)
     try:
         model.learn(total_timesteps=int(args.steps), callback=[callback, LiveCallback(out)], tb_log_name=name,

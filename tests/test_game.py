@@ -4,7 +4,7 @@ import random
 import pytest
 
 from labyrint import LabyrinthGame, Status, available_levels, load_level
-from labyrint.autopilot import PathFollower, run_episode
+from labyrint.autopilot import PathFollower, baseline_seconds, run_episode
 from labyrint.level import validate_level
 
 
@@ -48,8 +48,9 @@ def test_deterministic():
     assert run() == run()
 
 
-def test_random_play_never_escapes_or_enters_walls():
-    game = LabyrinthGame()
+@pytest.mark.parametrize("name", available_levels())
+def test_random_play_never_escapes_or_enters_walls(name):
+    game = LabyrinthGame(name)
     lv = game.level
     rng = random.Random(0)
     for episode in range(15):
@@ -117,12 +118,28 @@ def test_clone_is_independent():
     assert copy.state == game.state
 
 
-def test_autopilot_finishes():
-    game = LabyrinthGame(seed=0)
+@pytest.mark.parametrize("name", available_levels())
+def test_autopilot_finishes(name):
+    game = LabyrinthGame(name, seed=0)
     status, t, holes = run_episode(game, PathFollower(), jitter=2.0)
     assert status is Status.FINISHED, f"autopilot stopped after {holes} holes"
     assert holes == len(game.level.holes)
     assert t < 90
+
+
+def test_baseline_is_the_autopilot_time():
+    assert 30 < baseline_seconds("classic") < 45
+
+
+@pytest.mark.parametrize("name, sneaks", [("classic", True), ("pinnar", False)])
+def test_pins_block_sneaking_along_the_edge(name, sneaks):
+    """Rolling along the top edge slips between hole 6 and the frame - unless a pin is in the way."""
+    game = LabyrinthGame(name)
+    hx, _ = game.level.holes[5]
+    game.x, game.y = hx + 30.0, game.level.ball_radius
+    for _ in range(120):
+        game.step((-1.0, 0.0))
+    assert (game.status is Status.RUNNING and game.x < hx - 20) is sneaks
 
 
 def test_wall_rays_see_frame():

@@ -1,6 +1,8 @@
 """Spela Labyrint!
 
     python play.py                 # spela själv med mus eller tangentbord
+    python play.py --level pinnar  # banan med pinnar vid kanterna
+    python play.py --lang en       # in English
     python play.py --a             # titta på den inbyggda autopiloten
     python play.py --ai            # titta på den tränade AI:n (models/labyrint_ai.zip)
     python play.py --ai runs/ppo/best_model.zip
@@ -11,15 +13,17 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 
 import pygame
 
 from labyrint import LabyrinthGame, Status, available_levels
-from labyrint.agent import DEFAULT_MODEL, LivePilot, NeuralPilot, latest_run
+from labyrint.agent import DEFAULT_MODEL, LivePilot, NeuralPilot, latest_run, run_level
 from labyrint.autopilot import PathFollower
 from labyrint.env import STALL_MM, STALL_SECONDS
 from labyrint.geometry import clamp
+from labyrint.lang import LANGUAGES, set_language, t
 from labyrint.render import BAD, GOOD, PANEL_TEXT, Hud, Renderer
 
 KNOB_SPEED = 1.6          # tilt units per second while an arrow key is held
@@ -27,11 +31,13 @@ FALL_ANIM_SECONDS = 1.3
 WELCOME = "Luta brädet och för kulan från START till FINISH!"
 LIVE = "AI (live)"        # controller name for a model that is still training
 LIVE_PAUSE = 2.0          # seconds to show a finish/stall before the next live attempt
+LEVEL_WAIT = 60.0         # live: seconds to wait for a just-started training to say which level it uses
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Labyrint – det klassiska kulspelet.")
-    ap.add_argument("--level", default="classic", choices=available_levels())
+    ap.add_argument("--level", default=None, choices=available_levels(),
+                    help="standard: banan som AI:n tränades på, annars classic")
     ap.add_argument("--scale", type=float, default=2.6, help="pixlar per millimeter")
     ap.add_argument("--mouse-range", type=float, default=0.45,
                     help="hur långt från mitten (andel av halva brädet) musen ger full lutning")
@@ -40,7 +46,9 @@ def main() -> None:
                     help="låt en tränad AI spela (standard: models/labyrint_ai.zip)")
     ap.add_argument("--live", nargs="?", const="", default=None, metavar="KÖRNING",
                     help="titta på AI:n medan den tränar (standard: senaste körningen i runs/)")
+    ap.add_argument("--lang", choices=LANGUAGES, default="sv", help="språk: sv (svenska) eller en (English)")
     args = ap.parse_args()
+    set_language(args.lang)
 
     live: LivePilot | None = None
     if args.live is not None:
@@ -49,18 +57,25 @@ def main() -> None:
             raise SystemExit("Hittar ingen träning i runs/. Starta en med: python train.py")
         live = LivePilot(run)
         os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "10,40")  # leaves room for dashboard.py
+        # trana_ai_live.bat starts this window together with the training, before train.py
+        # has written args.json (which holds the level).
+        deadline = time.monotonic() + LEVEL_WAIT
+        while args.level is None and run_level(run) is None and time.monotonic() < deadline:
+            time.sleep(0.2)
+    trained = live.run_dir if live else args.ai
+    level = args.level or (trained and run_level(trained)) or "classic"
 
     pygame.init()
-    game = LabyrinthGame(args.level)
+    game = LabyrinthGame(level)
     renderer = Renderer(game.level, args.scale)
     screen = pygame.display.set_mode((renderer.width, renderer.height))
-    pygame.display.set_caption("Labyrint – AI:n tränar" if live else "Labyrint")
+    pygame.display.set_caption(t("Labyrint – AI:n tränar" if live else "Labyrint"))
     clock = pygame.time.Clock()
     pilot = PathFollower()
     ai_path = Path(args.ai) if args.ai else DEFAULT_MODEL
     ai: NeuralPilot | None = None
 
-    hud = Hud(controller="Autopilot" if args.autopilot else "Mus", message=WELCOME)
+    hud = Hud(controller="Autopilot" if args.autopilot else "Mus", message=t(WELCOME))
     if live:
         hud.controller, hud.message = LIVE, ""
 
@@ -71,7 +86,7 @@ def main() -> None:
             try:
                 ai = NeuralPilot(ai_path)
             except (ImportError, OSError, ValueError) as e:
-                hud.message, hud.message_color = f"Kunde inte ladda AI:n: {e}", BAD
+                hud.message, hud.message_color = t("Kunde inte ladda AI:n: {error}").format(error=e), BAD
                 return False
         return True
 
@@ -88,18 +103,20 @@ def main() -> None:
 
     def live_info() -> str:
         if live.info is None:
-            return f"Väntar på träningen\n{live.run_dir.name} ..."
+            return t("Väntar på träningen\n{run} ...").format(run=live.run_dir.name)
         steps, total = live.info["steps"], live.info["total"]
         minutes = steps * live.frame_skip / game.physics.tick_rate / 60
-        practice = f"{minutes / 60:.1f} timmars" if minutes >= 90 else f"{minutes:.0f} minuters"
-        return f"Tränad {steps / 1e6:.1f} av {total / 1e6:.0f} M steg\n= ca {practice} övning"
+        practice = (t("{hours} timmars").format(hours=f"{minutes / 60:.1f}") if minutes >= 90
+                    else t("{minutes} minuters").format(minutes=f"{minutes:.0f}"))
+        return t("Tränad {steps} av {total} M steg\n= ca {practice} övning").format(
+            steps=f"{steps / 1e6:.1f}", total=f"{total / 1e6:.0f}", practice=practice)
 
     def restart(count_attempt: bool) -> None:
         nonlocal fall_t, finish_recorded, accumulator, stall_s, stall_t, stalled, end_t
         game.reset()
         if count_attempt:
             hud.attempts += 1
-        hud.message, hud.message_color = ("" if hud.controller == LIVE else WELCOME), PANEL_TEXT
+        hud.message, hud.message_color = ("" if hud.controller == LIVE else t(WELCOME)), PANEL_TEXT
         fall_t, finish_recorded, accumulator = None, False, 0.0
         stall_s, stall_t, stalled, end_t = game.max_progress_s, 0.0, False, 0.0
         target[:] = [0.0, 0.0]
@@ -176,12 +193,12 @@ def main() -> None:
                     stall_s, stall_t = game.max_progress_s, game.time
                 elif live_mode and game.time - stall_t >= STALL_SECONDS:
                     stalled = True
-                    hud.message, hud.message_color = "Kulan står still.\nNytt försök!", BAD
+                    hud.message, hud.message_color = t("Kulan står still.\nNytt försök!"), BAD
 
             if game.status is Status.FELL:
                 if fall_t is None:
                     fall_t = 0.0
-                    hud.message = f"Kulan föll i hål {game.fell_into + 1}!"
+                    hud.message = t("Kulan föll i hål {n}!").format(n=game.fell_into + 1)
                     hud.message_color = BAD
                 fall_t += dt
                 if fall_t >= FALL_ANIM_SECONDS:
@@ -190,7 +207,8 @@ def main() -> None:
                 finish_recorded = True
                 if hud.best_time is None or game.time < hud.best_time:
                     hud.best_time = game.time
-                hud.message = f"I MÅL på {game.time:.1f} s!" + ("" if live_mode else "\nTryck R för att spela igen.")
+                hud.message = (t("I MÅL på {time} s!").format(time=f"{game.time:.1f}")
+                               + ("" if live_mode else t("\nTryck R för att spela igen.")))
                 hud.message_color = GOOD
             if live_mode and (stalled or game.status is Status.FINISHED):
                 end_t += dt

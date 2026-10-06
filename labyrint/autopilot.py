@@ -14,8 +14,6 @@ import time
 from .game import LabyrinthGame, Status
 from .geometry import clamp
 
-BASELINE_SECONDS = 38.0   # what PathFollower takes on "classic" - the time for the AI to beat
-
 
 class PathFollower:
     def __init__(self, speed: float = 120.0, gain: float = 5.0, track_gain: float = 4.0,
@@ -55,6 +53,12 @@ def run_episode(game: LabyrinthGame, pilot: PathFollower, max_seconds: float = 1
     while game.status is Status.RUNNING and game.time < max_seconds:
         game.step(pilot.act(game))
     return game.status, game.time, game.state.holes_passed
+
+
+def baseline_seconds(level: str = "classic") -> float | None:
+    """The autopilot's time from START - the time for the AI to beat (None if it doesn't finish)."""
+    status, t, _ = run_episode(LabyrinthGame(level), PathFollower())
+    return t if status is Status.FINISHED else None
 
 
 def main() -> None:
