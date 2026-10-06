@@ -18,6 +18,7 @@ py -3.12 -m venv .venv
 # spela
 .venv\Scripts\python play.py
 .venv\Scripts\python play.py --a             # titta på den inbyggda autopiloten
+.venv\Scripts\python play.py --ai            # titta på den tränade AI:n
 ```
 
 | Kontroll | Funktion |
@@ -28,7 +29,7 @@ py -3.12 -m venv .venv
 | R | Börja om |
 | P | Paus |
 | F1 | Visa vad AI:n "ser" (sensorer) |
-| F2 | Växla autopilot |
+| F2 | Växla mus → autopilot → AI |
 | Esc | Avsluta |
 
 ## Struktur
@@ -42,7 +43,11 @@ labyrint/
   render.py        pygame-grafik (läser bara spelet, ändrar det aldrig)
   autopilot.py     handskriven regulator som följer linjen – riktmärke för AI:n
   env.py           Gymnasium-miljön "Labyrint-v0" – API:t för AI:n
+  agent.py         låter en tränad modell styra spelet (NeuralPilot)
+  vecenv.py        kör många miljöer per process – snabbare träning
+models/            färdigtränad AI (labyrint_ai.zip)
 play.py            spela själv
+train.py           träna AI:n
 tests/             pytest
 ```
 
@@ -82,8 +87,11 @@ obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
 - **Observation:** 36 tal i [-1, 1]: kulans position/fart, lutning, linjen 15/40/80 mm
   framåt, linjens riktning och avstånd till linjen, de 4 närmaste hålen,
   avstånd till väggar i 8 riktningar och hur långt man kommit. (Tryck F1 i spelet så ser du dem.)
-- **Belöning:** +0,1 per mm framåt längs linjen (bakåt ger minus), −20 för hål,
+- **Belöning:** +0,1 per mm framåt längs linjen (bakåt ger minus), −5 för hål,
   +50 för mål, −0,01 per steg. Justeras via `RewardConfig`.
+- **Ingen parkering:** står kulan still (inga nya framsteg på 10 s, `stall_seconds`)
+  räknas det som att den ramlat. Utan den regeln lärde sig AI:n att gömma kulan i ett
+  hörn i stället för att våga sig förbi nästa hål.
 - **Läroplan (curriculum):** `random_start=0.5` gör att hälften av omgångarna startar på
   en slumpvis punkt längs linjen, så AI:n får öva på slutet av banan tidigt.
 - **Bilder:** `render_mode="rgb_array"` ger brädet som bild om vi senare vill träna på pixlar (CNN).

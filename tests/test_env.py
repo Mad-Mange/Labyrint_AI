@@ -39,6 +39,20 @@ def test_falling_is_punished_and_terminates():
     assert r <= env.rewards.fall + 1.0
 
 
+def test_parking_the_ball_counts_as_failure():
+    env = LabyrinthEnv(stall_seconds=5.0)
+    env.reset(seed=0)
+    steps = 0
+    while True:   # START is in a corner: tilting into it keeps the ball still
+        _, r, terminated, truncated, info = env.step(np.ones(2))
+        steps += 1
+        if terminated or truncated:
+            break
+    assert terminated and info["status"] == "stalled" and not info["is_success"]
+    assert r <= env.rewards.fall + 1.0
+    assert steps == round(5.0 * 30)
+
+
 def test_autopilot_through_env_gets_success():
     env = LabyrinthEnv()
     env.reset(seed=3)

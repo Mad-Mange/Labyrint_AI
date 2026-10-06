@@ -276,12 +276,17 @@ class LabyrinthGame:
     def wall_rays(self, n: int = 8, max_dist: float = 60.0) -> list[float]:
         """Free distance (mm, from the ball's surface) to the nearest wall in n directions."""
         r = self.level.ball_radius
+        reach = max_dist + r
+        x0, y0, x1, y1 = self.x - reach, self.y - reach, self.x + reach, self.y + reach
+        # Only walls whose bounding box is within reach can be hit (same result, ~5x faster).
+        near = [w for w in self._walls if w.aabb[0] <= x1 and w.aabb[2] >= x0
+                and w.aabb[1] <= y1 and w.aabb[3] >= y0]
         out = []
         for k in range(n):
             a = 2.0 * math.pi * k / n
             dx, dy = math.cos(a), math.sin(a)
-            t = max_dist + r
-            for w in self._walls:
+            t = reach
+            for w in near:
                 t = min(t, w.raycast(self.x, self.y, dx, dy, t))
             out.append(max(0.0, t - r))
         return out

@@ -31,16 +31,42 @@ from .geometry import clamp
 LOOKAHEAD_MM = (15.0, 40.0, 80.0)
 N_HOLES = 4
 N_RAYS = 8
+STALL_MM = 5.0   # progress needed to reset the stall timer
 OBS_SIZE = 2 + 2 + 2 + 2 * len(LOOKAHEAD_MM) + 2 + 1 + 3 * N_HOLES + N_RAYS + 1
 
 
 @dataclass(frozen=True)
 class RewardConfig:
     progress: float = 0.1        # per mm moved forward along the line (backwards is negative)
-    fall: float = -20.0          # dropping into a hole
+    fall: float = -5.0           # dropping into a hole, or stalling (see stall_seconds). Kept mild:
+                                 # falling already forfeits all future reward, and a harsh penalty
+                                 # teaches the agent to park the ball instead of trying.
     finish: float = 50.0         # reaching FINISH
     time: float = -0.01          # per env step, encourages hurrying
     off_line: float = 0.0        # per step and mm away from the line (0 = off)
+
+
+def observe(game: LabyrinthGame) -> np.ndarray:
+    """The observation vector for a game state (see the module docstring for the layout).
+
+    A module-level function so trained agents can also drive a plain LabyrinthGame (play.py).
+    """
+    lv = game.level
+    x, y = game.ball_pos
+    vx, vy = game.ball_vel
+    obs = [x / lv.width * 2 - 1, y / lv.height * 2 - 1, vx / 750.0, vy / 750.0, *game.tilt]
+    for px, py in game.path_lookahead(LOOKAHEAD_MM):
+        obs += [(px - x) / 100.0, (py - y) / 100.0]
+    tx, ty = lv.path.tangent_at(game.progress_s)
+    qx, qy = lv.path.point_at(game.progress_s)
+    cross = (x - qx) * -ty + (y - qy) * tx       # signed offset: + is left of the direction of travel
+    obs += [tx, ty, cross / 30.0]
+    for dx, dy, d in game.nearest_holes(N_HOLES):
+        rim = d - lv.hole_radius
+        obs += [1.0 - clamp(rim / 60.0, 0.0, 1.0), dx / max(d, 1e-6), dy / max(d, 1e-6)]
+    obs += [r / 60.0 for r in game.wall_rays(N_RAYS, 60.0)]
+    obs.append(game.progress_s / lv.path.length * 2 - 1)
+    return np.clip(np.asarray(obs, dtype=np.float32), -1.0, 1.0)
 
 
 class LabyrinthEnv(gym.Env):
@@ -48,6 +74,7 @@ class LabyrinthEnv(gym.Env):
 
     def __init__(self, level: str = "classic", render_mode: str | None = None, frame_skip: int = 2,
                  max_episode_seconds: float = 120.0, random_start: float = 0.0, start_jitter: float = 1.0,
+                 stall_seconds: float | None = 10.0,
                  physics: PhysicsConfig | None = None, reward: RewardConfig | None = None,
                  render_scale: float = 2.6):
         """
@@ -55,6 +82,8 @@ class LabyrinthEnv(gym.Env):
         random_start: probability that an episode starts at a random point on the guide line
             instead of at START. Good for curriculum learning: the agent gets to practise the
             hard final bends without first mastering the whole board.
+        stall_seconds: end the episode as a failure (same penalty as a hole) when the ball
+            has not advanced STALL_MM along the line for this long. None disables it.
         """
         if render_mode is not None and render_mode not in self.metadata["render_modes"]:
             raise ValueError(f"unsupported render_mode {render_mode!r}")
@@ -64,6 +93,7 @@ class LabyrinthEnv(gym.Env):
         self.max_episode_seconds = max_episode_seconds
         self.random_start = random_start
         self.start_jitter = start_jitter
+        self.stall_seconds = stall_seconds
         self.rewards = reward or RewardConfig()
         self.render_scale = render_scale
         self.metadata = {**self.metadata, "render_fps": self.game.physics.tick_rate // frame_skip}
@@ -85,6 +115,8 @@ class LabyrinthEnv(gym.Env):
         self.game.reset(start_s=start_s, jitter=self.start_jitter, seed=game_seed)
         if start_s is not None:
             self._nudge_off_holes()
+        self._stall_s, self._stall_t = self.game.max_progress_s, 0.0
+        self._stalled = False
         if self.render_mode == "human":
             self.render()
         return self._observation(), self._info()
@@ -101,8 +133,12 @@ class LabyrinthEnv(gym.Env):
         if rw.off_line:
             reward -= rw.off_line * game.level.path.project(*game.ball_pos, game.progress_s - 5,
                                                              game.progress_s + 5)[1]
-        terminated = game.status is not Status.RUNNING
-        if game.status is Status.FELL:
+        if game.max_progress_s >= self._stall_s + STALL_MM:
+            self._stall_s, self._stall_t = game.max_progress_s, game.time
+        self._stalled = (self.stall_seconds is not None and game.status is Status.RUNNING
+                         and game.time - self._stall_t >= self.stall_seconds - 1e-9)
+        terminated = game.status is not Status.RUNNING or self._stalled
+        if game.status is Status.FELL or self._stalled:
             reward += rw.fall
         elif game.status is Status.FINISHED:
             reward += rw.finish
@@ -150,28 +186,12 @@ class LabyrinthEnv(gym.Env):
             game.reset(start_s=max(0.0, game.progress_s - 3.0))
 
     def _observation(self) -> np.ndarray:
-        g = self.game
-        lv = g.level
-        x, y = g.ball_pos
-        vx, vy = g.ball_vel
-        obs = [x / lv.width * 2 - 1, y / lv.height * 2 - 1, vx / 750.0, vy / 750.0, *g.tilt]
-        for px, py in g.path_lookahead(LOOKAHEAD_MM):
-            obs += [(px - x) / 100.0, (py - y) / 100.0]
-        tx, ty = lv.path.tangent_at(g.progress_s)
-        qx, qy = lv.path.point_at(g.progress_s)
-        cross = (x - qx) * -ty + (y - qy) * tx       # signed offset: + is left of the direction of travel
-        obs += [tx, ty, cross / 30.0]
-        for dx, dy, d in g.nearest_holes(N_HOLES):
-            rim = d - lv.hole_radius
-            obs += [1.0 - clamp(rim / 60.0, 0.0, 1.0), dx / max(d, 1e-6), dy / max(d, 1e-6)]
-        obs += [r / 60.0 for r in g.wall_rays(N_RAYS, 60.0)]
-        obs.append(g.progress_s / lv.path.length * 2 - 1)
-        return np.clip(np.asarray(obs, dtype=np.float32), -1.0, 1.0)
+        return observe(self.game)
 
     def _info(self) -> dict:
         st = self.game.state
         return {
-            "status": st.status.value,
+            "status": "stalled" if self._stalled else st.status.value,
             "progress": st.progress,
             "holes_passed": st.holes_passed,
             "time": st.time,

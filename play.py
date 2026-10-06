@@ -2,14 +2,18 @@
 
     python play.py                 # spela själv med mus eller tangentbord
     python play.py --a             # titta på den inbyggda autopiloten
+    python play.py --ai            # titta på den tränade AI:n (models/labyrint_ai.zip)
+    python play.py --ai runs/ppo/best_model.zip
 """
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pygame
 
 from labyrint import LabyrinthGame, Status, available_levels
+from labyrint.agent import DEFAULT_MODEL, NeuralPilot
 from labyrint.autopilot import PathFollower
 from labyrint.geometry import clamp
 from labyrint.render import BAD, GOOD, PANEL_TEXT, Hud, Renderer
@@ -26,6 +30,8 @@ def main() -> None:
     ap.add_argument("--mouse-range", type=float, default=0.45,
                     help="hur långt från mitten (andel av halva brädet) musen ger full lutning")
     ap.add_argument("--a", "-a", "--autopilot", dest="autopilot", action="store_true", help="låt autopiloten spela")
+    ap.add_argument("--ai", nargs="?", const=str(DEFAULT_MODEL), default=None, metavar="MODELL",
+                    help="låt en tränad AI spela (standard: models/labyrint_ai.zip)")
     args = ap.parse_args()
 
     pygame.init()
@@ -35,8 +41,24 @@ def main() -> None:
     pygame.display.set_caption("Labyrint")
     clock = pygame.time.Clock()
     pilot = PathFollower()
+    ai_path = Path(args.ai) if args.ai else DEFAULT_MODEL
+    ai: NeuralPilot | None = None
 
     hud = Hud(controller="Autopilot" if args.autopilot else "Mus", message=WELCOME)
+
+    def load_ai() -> bool:
+        """Load the trained model the first time it is needed (torch takes a moment to start)."""
+        nonlocal ai
+        if ai is None:
+            try:
+                ai = NeuralPilot(ai_path)
+            except (ImportError, OSError, ValueError) as e:
+                hud.message, hud.message_color = f"Kunde inte ladda AI:n: {e}", BAD
+                return False
+        return True
+
+    if args.ai and not args.autopilot and load_ai():
+        hud.controller = "AI"
     target = [0.0, 0.0]
     tick = 1.0 / game.physics.tick_rate
     accumulator = 0.0
@@ -70,8 +92,12 @@ def main() -> None:
                 elif event.key == pygame.K_F1:
                     debug = not debug
                 elif event.key == pygame.K_F2:
-                    hud.controller = "Mus" if hud.controller == "Autopilot" else "Autopilot"
-                elif event.key == pygame.K_SPACE and hud.controller != "Autopilot":
+                    order = ["Mus", "Autopilot"] + (["AI"] if ai is not None or ai_path.exists() else [])
+                    current = hud.controller if hud.controller in order else "Mus"
+                    hud.controller = order[(order.index(current) + 1) % len(order)]
+                    if hud.controller == "AI" and not load_ai():
+                        hud.controller = "Mus"
+                elif event.key == pygame.K_SPACE and hud.controller not in ("Autopilot", "AI"):
                     hud.controller = "Tangentbord"
                     target[:] = [0.0, 0.0]
             elif event.type == pygame.MOUSEMOTION and hud.controller == "Tangentbord":
@@ -99,6 +125,8 @@ def main() -> None:
                 while accumulator >= tick and game.status is Status.RUNNING:
                     if hud.controller == "Autopilot":
                         target[:] = pilot.act(game)
+                    elif hud.controller == "AI":
+                        target[:] = ai.act(game)
                     game.step(target)
                     accumulator -= tick
                 hud.best_holes = max(hud.best_holes, game.state.holes_passed)

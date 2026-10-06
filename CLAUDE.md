@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-A digital version of the classic wooden tilt maze (reference photo: `pictures/Labyrint.png`), built so that a neural network can later be trained to play it with reinforcement learning. Phase 1 (game, renderer, Gymnasium env, scripted baseline) is done. Phase 2 is RL training (planned: stable-baselines3 PPO/SAC + CUDA torch; the machine has an RTX 3080).
+A digital version of the classic wooden tilt maze (reference photo: `pictures/Labyrint.png`), built so that a neural network can later be trained to play it with reinforcement learning. Phase 1 (game, renderer, Gymnasium env, scripted baseline) is done. Phase 2 is RL training with stable-baselines3 PPO (`train.py`; CUDA torch, the machine has an RTX 3080).
 
 The user writes in Swedish. In-game UI text and `README.md` are Swedish; code identifiers and comments are English.
 
@@ -17,6 +17,10 @@ Use the project venv (Python 3.12, chosen over the system Python 3.14 for torch 
 .venv/Scripts/python.exe -m pytest                     # all tests (~1 s)
 .venv/Scripts/python.exe -m pytest tests/test_game.py::test_autopilot_finishes   # single test
 .venv/Scripts/python.exe -m labyrint.autopilot --episodes 20   # headless baseline: success rate, time, ticks/s
+.venv/Scripts/python.exe train.py --name ppo           # train PPO (16 subprocess envs) -> runs/ppo/best_model.zip
+.venv/Scripts/python.exe -m labyrint.agent runs/ppo/best_model.zip --episodes 20   # measure a trained model
+.venv/Scripts/python.exe play.py --ai [model.zip]      # watch a model (default models/labyrint_ai.zip)
+.venv/Scripts/tensorboard.exe --logdir runs
 .venv/Scripts/python.exe -c "from labyrint.level import load_level, validate_level; print(validate_level(load_level('classic')))"
 ```
 
@@ -29,6 +33,8 @@ The core idea: **`LabyrinthGame` (`labyrint/game.py`) is a pure headless simulat
 - `render.py` only *reads* the game (human play, autopilot and AI all use the same draw path). It never calls `convert()`, so it works without a display. `board_array()` gives pixels for the env.
 - `env.py` wraps the game as Gymnasium `Labyrint-v0` (registered in `labyrint/__init__.py`, and only if gymnasium is installed).
 - `autopilot.py` is a hand-written path-following controller. It is used as a solvability check and as the time to beat (≈38 s on `classic`).
+- `agent.py` (`NeuralPilot`) runs a trained SB3 model as a controller with the same `act(game)` interface as the autopilot. torch/SB3 are imported lazily so the game runs without them.
+- `train.py` (top level) trains with SB3: `SubprocVecEnv` + `VecNormalize` (rewards only, so models need no stats to play), curriculum via `random_start`, and an eval callback that plays full games from START and keeps `best_model.zip` by (success rate, mean time). `runs/` is gitignored; a model worth keeping is copied to `models/labyrint_ai.zip`.
 - `play.py` holds the human input loop (fixed-timestep accumulator, fall animation, attempts/best-time HUD).
 
 Conventions that span files:
@@ -40,5 +46,5 @@ Conventions that span files:
 - **Walls:** walls are oriented rectangles (`Wall`). `Level.walls` are the visible strips. `Level.frame` adds invisible collision slabs outside the board, and `all_walls` combines both.
 - **Levels:** `levels/*.json` path control points are smoothed with Chaikin (`path_smoothing`), and validation runs on the *smoothed* path. After editing a level, run `validate_level` and the autopilot.
 - **`clone()`:** this does a shallow `__dict__` copy (the level is shared; the rng is copied explicitly). If you add mutable state to `LabyrinthGame`, copy it explicitly in `clone()`. `GameState` is a frozen dataclass compared for equality in determinism tests.
-- **Observation layout:** the layout in `env.py` (`OBS_SIZE` = 36, all values clipped to [-1, 1]) is the contract with trained models. Changing it, `frame_skip` or `PhysicsConfig` invalidates any trained agents. The F1 debug overlay in the renderer draws the same sensors the observation uses.
+- **Observation layout:** `observe(game)` in `env.py` (`OBS_SIZE` = 36, all values clipped to [-1, 1]) is the contract with trained models; both the env and `NeuralPilot` use it. `NeuralPilot` re-decides every `frame_skip` ticks like the env (`test_neural_pilot_replays_env_trajectory`). Changing it, `frame_skip` or `PhysicsConfig` invalidates any trained agents. The F1 debug overlay in the renderer draws the same sensors the observation uses.
 - **Physics changes:** physics changes can break `test_autopilot_finishes` and shift the baseline time. Re-run the autopilot benchmark after tuning.

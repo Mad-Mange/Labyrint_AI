@@ -455,7 +455,7 @@ class Renderer:
             "Mellanslag: plant bräde",
             "R: börja om    P: paus",
             "F1: visa AI-sensorer",
-            "F2: växla autopilot",
+            "F2: växla autopilot / AI",
             "Esc: avsluta",
         ]
         y = self.height - 22 - len(help_lines) * 21
