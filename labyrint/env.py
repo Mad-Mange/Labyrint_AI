@@ -32,6 +32,7 @@ LOOKAHEAD_MM = (15.0, 40.0, 80.0)
 N_HOLES = 4
 N_RAYS = 8
 STALL_MM = 5.0   # progress needed to reset the stall timer
+STALL_SECONDS = 10.0
 OBS_SIZE = 2 + 2 + 2 + 2 * len(LOOKAHEAD_MM) + 2 + 1 + 3 * N_HOLES + N_RAYS + 1
 
 
@@ -74,7 +75,7 @@ class LabyrinthEnv(gym.Env):
 
     def __init__(self, level: str = "classic", render_mode: str | None = None, frame_skip: int = 2,
                  max_episode_seconds: float = 120.0, random_start: float = 0.0, start_jitter: float = 1.0,
-                 stall_seconds: float | None = 10.0,
+                 stall_seconds: float | None = STALL_SECONDS,
                  physics: PhysicsConfig | None = None, reward: RewardConfig | None = None,
                  render_scale: float = 2.6):
         """

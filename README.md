@@ -18,8 +18,10 @@ py -3.12 -m venv .venv
 # spela
 .venv\Scripts\python play.py
 .venv\Scripts\python play.py --a             # titta på den inbyggda autopiloten
-.venv\Scripts\python play.py --ai            # titta på den tränade AI:n
+.venv\Scripts\python play.py --ai            # titta på den tränade AI:n (eller dubbelklicka spela_ai.bat)
 ```
+
+Kör alltid med `.venv\Scripts\python` – vanliga `python` har inte pygame installerat.
 
 | Kontroll | Funktion |
 |---|---|
@@ -48,6 +50,9 @@ labyrint/
 models/            färdigtränad AI (labyrint_ai.zip)
 play.py            spela själv
 train.py           träna AI:n
+dashboard.py       grafer över en träning, live
+spela_ai.bat       dubbelklicka: titta på den tränade AI:n
+trana_ai_live.bat  dubbelklicka: träna en ny AI och se den lära sig live
 tests/             pytest
 ```
 
@@ -102,7 +107,43 @@ obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
 .venv\Scripts\python -m labyrint.autopilot --episodes 20
 ```
 
-Den handskrivna autopiloten klarar banan på ca 38 s. Målet för AI:n: klara den snabbare.
+Den handskrivna autopiloten klarar banan på ca 38 s. Den tränade AI:n (`models/labyrint_ai.zip`)
+klarar den på ca 7 s: i stället för att följa linjen åker den längs väggarna och rundar hålen
+på utsidan.
+
+```powershell
+.venv\Scripts\python -m labyrint.agent --episodes 100 --jitter 5   # mät AI:n: 99 % i mål
+```
+
+## Träna AI:n
+
+```powershell
+# en gång: torch (med CUDA) och stable-baselines3 m.fl.
+.venv\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+.venv\Scripts\python -m pip install -r requirements-ai.txt
+
+.venv\Scripts\python train.py --name ppo        # ca 35 min för 30 M steg -> runs/ppo/best_model.zip
+```
+
+### Se AI:n träna live
+
+Dubbelklicka **`trana_ai_live.bat`**. Den startar en ny träning och öppnar två fönster:
+
+- **Spelet** (`play.py --live`): AI:n spelar med sin *senaste* hjärna. Träningen sparar en
+  ögonblicksbild var 3:e sekund och varje nytt försök använder den nyaste – man ser kulan gå
+  från att ramla direkt till att klara hela banan (efter ca 2–3 minuter).
+- **Graferna** (`dashboard.py`): andel i mål, tid till mål jämfört med autopiloten, belöning,
+  förlust (value loss), hur mycket den fortfarande slumpar (utforskning) och hur väl den
+  förutser sin belöning.
+
+Själva träningen spelar 64 omgångar samtidigt, ca 500 gånger snabbare än realtid, så det man
+ser i spelet är inte träningsomgångarna utan ett prov med den senaste versionen.
+Stäng träningsfönstret (det svarta) för att avbryta; de andra två kan stängas och öppnas fritt:
+
+```powershell
+.venv\Scripts\python play.py --live          # följ den senaste körningen i runs/
+.venv\Scripts\python dashboard.py
+```
 
 ## Tester
 
@@ -112,6 +153,6 @@ Den handskrivna autopiloten klarar banan på ca 38 s. Målet för AI:n: klara de
 
 ## Nästa steg
 
-1. Installera `torch` (CUDA) och `stable-baselines3`.
-2. Träna PPO eller SAC på `Labyrint-v0` med flera parallella miljöer och curriculum.
-3. Titta på den tränade agenten i spelet (`F2`-läget kan utökas med "AI").
+1. Välj bästa modell på prov med större startspridning – nu väljs den snabbaste, inte den stabilaste.
+2. Fler och svårare banor; träna en AI som klarar banor den aldrig sett.
+3. Träna på pixlar (`render_mode="rgb_array"`) i stället för sensorvärden.

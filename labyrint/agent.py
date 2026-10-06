@@ -3,10 +3,17 @@
     python -m labyrint.agent models/labyrint_ai.zip --episodes 20
 
 Needs torch and stable-baselines3 (imported lazily, so the game itself runs without them).
+
+LivePilot follows a training run instead: train.py writes a policy snapshot every few
+seconds (write_live_snapshot) and `python play.py --live` plays with the newest one.
 """
 from __future__ import annotations
 
 import argparse
+import importlib
+import json
+import os
+import pickle
 import time
 from pathlib import Path
 
@@ -16,6 +23,15 @@ from .env import observe
 from .game import LabyrinthGame, Status
 
 DEFAULT_MODEL = Path(__file__).resolve().parents[1] / "models" / "labyrint_ai.zip"
+RUNS = Path(__file__).resolve().parents[1] / "runs"
+LIVE_POLICY = "live_policy.pt"   # in the run folder, replaced every few seconds during training
+LIVE_INFO = "live.json"          # {"steps", "total", "policy_class"}, written after the policy
+
+
+def latest_run(runs: Path = RUNS) -> Path | None:
+    """The most recently started training run (folder with args.json), or None."""
+    started = list(runs.glob("*/args.json"))
+    return max(started, key=lambda p: p.stat().st_mtime).parent if started else None
 
 
 def load_model(path: str | Path, device: str = "cpu"):
@@ -56,6 +72,50 @@ class NeuralPilot:
             self._action = (float(a[0]), float(a[1]))
         self._tick = tick
         return self._action
+
+
+def write_live_snapshot(policy, run_dir: Path, info: dict) -> bool:
+    """Save a training policy for LivePilot. Returns False if a viewer is reading it right now."""
+    cls = type(policy)
+    meta = {**info, "policy_class": f"{cls.__module__}:{cls.__qualname__}"}
+    try:
+        # Write to a temporary file and rename, so a reader never sees half a file.
+        policy.save(str(run_dir / (LIVE_POLICY + ".tmp")))
+        os.replace(run_dir / (LIVE_POLICY + ".tmp"), run_dir / LIVE_POLICY)
+        (run_dir / (LIVE_INFO + ".tmp")).write_text(json.dumps(meta))
+        os.replace(run_dir / (LIVE_INFO + ".tmp"), run_dir / LIVE_INFO)
+    except PermissionError:  # Windows refuses to replace a file another process has open
+        return False
+    return True
+
+
+class LivePilot(NeuralPilot):
+    """A NeuralPilot that follows a training run: reload() swaps in the newest snapshot."""
+
+    def __init__(self, run_dir: str | Path, frame_skip: int = 2):
+        super().__init__(None, frame_skip)
+        self.run_dir = Path(run_dir)
+        self.info: dict | None = None   # live.json of the loaded snapshot
+        self._stamp: int | None = None
+
+    def reload(self) -> bool:
+        """Load the newest snapshot if the training has written a new one since last time."""
+        try:
+            stamp = (self.run_dir / LIVE_INFO).stat().st_mtime_ns
+        except FileNotFoundError:
+            return False
+        if stamp == self._stamp:
+            return False
+        try:
+            info = json.loads((self.run_dir / LIVE_INFO).read_text())
+            module, name = info["policy_class"].split(":")
+            cls = getattr(importlib.import_module(module), name)
+            policy = cls.load(str(self.run_dir / LIVE_POLICY), device="cpu")
+        except (OSError, ValueError, KeyError, EOFError, RuntimeError, pickle.UnpicklingError):
+            return False  # caught it while the training was replacing the files - try again later
+        self.model, self.info, self._stamp = policy, info, stamp
+        self._tick = None
+        return True
 
 
 def main() -> None:

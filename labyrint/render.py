@@ -39,6 +39,7 @@ class Hud:
     message: str = ""
     message_color: tuple[int, int, int] = PANEL_TEXT
     paused: bool = False
+    info: str = ""          # small extra lines under "Styrs av" (e.g. training progress)
 
 
 # --------------------------------------------------------------------------- textures
@@ -440,7 +441,11 @@ class Renderer:
         y += 112
 
         screen.blit(self.f_text.render(f"Styrs av: {hud.controller}", True, PANEL_TEXT), (x0, y))
-        y += 40
+        y += 32
+        for line in hud.info.splitlines():
+            screen.blit(self.f_small.render(line, True, PANEL_DIM), (x0, y))
+            y += 21
+        y += 8
 
         message = "PAUS – tryck P" if hud.paused else hud.message
         color = ACCENT if hud.paused else hud.message_color

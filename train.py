@@ -7,11 +7,16 @@
 
 Allt hamnar i runs/<namn>/: best_model.zip (bäst på riktiga omgångar från START),
 latest_model.zip, vecnormalize.pkl och tensorboard-loggar.
+
+Titta medan den tränar (eller kör trana_ai_live.bat som startar allt på en gång):
+    python play.py --live                        # AI:n spelar med sin senaste hjärna
+    python dashboard.py                          # grafer över träningen
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -19,14 +24,16 @@ from pathlib import Path
 import numpy as np
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.logger import KVWriter
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
+from labyrint.agent import write_live_snapshot
+from labyrint.autopilot import BASELINE_SECONDS as AUTOPILOT_SECONDS
 from labyrint.env import LabyrinthEnv
 from labyrint.vecenv import BatchedSubprocVecEnv
 
 ROOT = Path(__file__).resolve().parent
-AUTOPILOT_SECONDS = 38.0   # the hand-written baseline on "classic"
 
 
 def make_env(level: str, random_start: float, max_seconds: float):
@@ -125,6 +132,51 @@ class EvalCallback(BaseCallback):
             venv.save(str(self.out / "vecnormalize.pkl"))
 
 
+class JsonlWriter(KVWriter):
+    """Logger output that appends each update's values as one JSON line (read by dashboard.py)."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def write(self, key_values: dict, key_excluded: dict, step: int = 0) -> None:
+        row = {"step": step}
+        for k, v in key_values.items():
+            if isinstance(v, (int, float, np.integer, np.floating)) and "json" not in (key_excluded.get(k) or ()):
+                row[k] = float(v)
+        with self.path.open("a") as f:
+            f.write(json.dumps(row) + "\n")
+
+    def close(self) -> None:
+        pass
+
+
+class LiveCallback(BaseCallback):
+    """Feeds the live views: progress.jsonl for dashboard.py and, every few seconds,
+    a policy snapshot for `play.py --live`."""
+
+    def __init__(self, out: Path, snapshot_seconds: float = 3.0):
+        super().__init__()
+        self.out, self.snapshot_seconds = out, snapshot_seconds
+        self.last_snapshot = -math.inf
+
+    def _on_training_start(self) -> None:
+        log = self.out / "progress.jsonl"
+        if self.num_timesteps == 0:
+            log.unlink(missing_ok=True)   # a fresh run in a reused folder; --resume appends
+        self.model.logger.output_formats.append(JsonlWriter(log))
+
+    def _on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self) -> None:
+        total = self.model._total_timesteps
+        self.logger.record("time/target_timesteps", total)
+        now = time.perf_counter()
+        if now - self.last_snapshot >= self.snapshot_seconds and write_live_snapshot(
+                self.model.policy, self.out, {"steps": self.num_timesteps, "total": total}):
+            self.last_snapshot = now
+
+
 def build_model(algo: str, venv, args, tb_log: str):
     if algo == "ppo":
         return PPO(
@@ -191,7 +243,7 @@ def main() -> None:
           f"({model.device}). Autopiloten klarar banan på ca {AUTOPILOT_SECONDS:.0f} s.", flush=True)
     callback = EvalCallback(out, args.level, int(args.eval_freq), args.eval_episodes)
     try:
-        model.learn(total_timesteps=int(args.steps), callback=callback, tb_log_name=name,
+        model.learn(total_timesteps=int(args.steps), callback=[callback, LiveCallback(out)], tb_log_name=name,
                     reset_num_timesteps=resume is None)
     except KeyboardInterrupt:
         print("Avbruten – sparar.")

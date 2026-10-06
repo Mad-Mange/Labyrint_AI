@@ -4,3 +4,4 @@ stable-baselines3>=2.4
 tensorboard>=2.17
 tqdm
 rich
+matplotlib

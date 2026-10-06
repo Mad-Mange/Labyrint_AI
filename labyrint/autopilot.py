@@ -14,6 +14,8 @@ import time
 from .game import LabyrinthGame, Status
 from .geometry import clamp
 
+BASELINE_SECONDS = 38.0   # what PathFollower takes on "classic" - the time for the AI to beat
+
 
 class PathFollower:
     def __init__(self, speed: float = 120.0, gain: float = 5.0, track_gain: float = 4.0,

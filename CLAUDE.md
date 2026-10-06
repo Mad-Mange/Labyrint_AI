@@ -20,6 +20,8 @@ Use the project venv (Python 3.12, chosen over the system Python 3.14 for torch 
 .venv/Scripts/python.exe train.py --name ppo           # train PPO (16 subprocess envs) -> runs/ppo/best_model.zip
 .venv/Scripts/python.exe -m labyrint.agent runs/ppo/best_model.zip --episodes 20   # measure a trained model
 .venv/Scripts/python.exe play.py --ai [model.zip]      # watch a model (default models/labyrint_ai.zip)
+.venv/Scripts/python.exe play.py --live [runs/<name>]  # watch a run while it trains (default: newest run)
+.venv/Scripts/python.exe dashboard.py [runs/<name>]    # live matplotlib graphs of a run
 .venv/Scripts/tensorboard.exe --logdir runs
 .venv/Scripts/python.exe -c "from labyrint.level import load_level, validate_level; print(validate_level(load_level('classic')))"
 ```
@@ -36,6 +38,9 @@ The core idea: **`LabyrinthGame` (`labyrint/game.py`) is a pure headless simulat
 - `agent.py` (`NeuralPilot`) runs a trained SB3 model as a controller with the same `act(game)` interface as the autopilot. torch/SB3 are imported lazily so the game runs without them.
 - `train.py` (top level) trains with SB3: `SubprocVecEnv` + `VecNormalize` (rewards only, so models need no stats to play), curriculum via `random_start`, and an eval callback that plays full games from START and keeps `best_model.zip` by (success rate, mean time). `runs/` is gitignored; a model worth keeping is copied to `models/labyrint_ai.zip`.
 - `play.py` holds the human input loop (fixed-timestep accumulator, fall animation, attempts/best-time HUD).
+- **Live training views** are decoupled from the training through files in `runs/<name>/`. `LiveCallback` in `train.py` appends every logger dump to `progress.jsonl` (a `JsonlWriter` added to SB3's logger), which `dashboard.py` tails. Every 3 s it also writes `live_policy.pt` + `live.json` via `write_live_snapshot` (temp file + `os.replace`; it skips a snapshot if Windows reports the file busy). `LivePilot` in `agent.py` reloads the snapshot at the start of each attempt in `play.py --live`. In live mode an attempt also ends after `STALL_SECONDS` without progress, like in the env.
+- `spela_ai.bat` / `trana_ai_live.bat` are double-click launchers for the user. They are saved in **code page 850, not UTF-8**: cmd misreads batch files after `chcp 65001` when they contain å/ä/ö. Regenerate them with `encoding="cp850", newline="\r\n"`.
+- A training started from a console window dies when that window is closed (the Intel Fortran runtime prints `forrtl: error (200): ... window-CLOSE event`). To run one detached, start it hidden via `Win32_Process.Create` with `ShowWindow=0`.
 
 Conventions that span files:
 
