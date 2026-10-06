@@ -73,6 +73,21 @@ class EvalCallback(BaseCallback):
         self.t0 = time.perf_counter()
         self.history: list[dict] = []
 
+    def _on_training_start(self) -> None:
+        # When resuming: continue the eval schedule and the best-so-far from the earlier run,
+        # instead of evaluating many times in a row and overwriting a better best_model.zip.
+        self.next_eval = (self.num_timesteps // self.freq + 1) * self.freq
+        hist = self.out / "eval_history.json"
+        if self.num_timesteps > 0 and hist.exists():
+            self.history = json.loads(hist.read_text())
+            self.best_key = max(map(self._key, self.history), default=None)
+            self.t0 -= 60 * self.history[-1]["minutes"] if self.history else 0
+
+    @staticmethod
+    def _key(r: dict) -> tuple[float, float]:
+        # Best = most finishes, then fastest; before the first finish: most holes passed.
+        return (r["success_rate"], -r["mean_time"] if r["success_rate"] > 0 else r["holes_passed"] - 1e3)
+
     def _on_step(self) -> bool:
         if self.num_timesteps >= self.next_eval:
             self.next_eval += self.freq
@@ -89,8 +104,7 @@ class EvalCallback(BaseCallback):
         for k, v in r.items():
             if not np.isnan(v):
                 self.logger.record(f"eval/{k}", v)
-        # Best = most finishes, then fastest; before the first finish: most holes passed.
-        key = (r["success_rate"], -r["mean_time"] if r["success_rate"] > 0 else r["holes_passed"] - 1e3)
+        key = self._key(r)
         best = self.best_key is None or key > self.best_key
         self.model.save(self.out / "latest_model")
         self._save_vecnormalize()
