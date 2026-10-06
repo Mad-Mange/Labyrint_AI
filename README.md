@@ -1,158 +1,195 @@
 # Labyrint AI
 
-En digital version av det klassiska trälabyrintspelet från 70/80-talet (se
-`pictures/Labyrint.png`). Med två rattar lutar man brädet och försöker föra stålkulan
-från **START** till **FINISH** utan att den ramlar ner i något av de 23 numrerade hålen.
+A digital version of the classic wooden tilt maze from the 70s and 80s. You tilt the board
+with two knobs and try to guide the steel ball from **START** to **FINISH** without it
+dropping into any of the 23 numbered holes.
 
-Spelet är byggt för att ett neuralt nätverk ska kunna lära sig spela det: fysikmotorn
-körs helt utan grafik (ca 700 gånger snabbare än realtid) och har ett färdigt
-[Gymnasium](https://gymnasium.farama.org/)-API, standarden för förstärkningsinlärning.
+![The game: the trained AI playing the level with pins](docs/game.png)
 
-## Kom igång
+The game is built so that a neural network can learn to play it: the physics engine runs
+without any graphics (about 700 times faster than real time) and comes with a ready-made
+[Gymnasium](https://gymnasium.farama.org/) API, the standard interface for reinforcement learning.
+
+## Getting started
 
 ```powershell
-# en gång: skapa miljön (Python 3.12) och installera beroenden
+# once: create the environment (Python 3.12) and install the dependencies
 py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 
-# spela
-.venv\Scripts\python play.py
-.venv\Scripts\python play.py --a             # titta på den inbyggda autopiloten
-.venv\Scripts\python play.py --ai            # titta på den tränade AI:n (eller dubbelklicka spela_ai.bat)
+# play
+.venv\Scripts\python play.py --lang en                # play yourself (the UI is Swedish without --lang en)
+.venv\Scripts\python play.py --lang en --level pinnar # the harder level with pins along the edges
+.venv\Scripts\python play.py --lang en --a            # watch the built-in autopilot
+.venv\Scripts\python play.py --lang en --ai           # watch the trained AI (or double-click spela_ai.bat)
 ```
 
-Kör alltid med `.venv\Scripts\python` – vanliga `python` har inte pygame installerat.
+Always run with `.venv\Scripts\python`: plain `python` does not have pygame installed.
 
-| Kontroll | Funktion |
+| Control | Action |
 |---|---|
-| Mus | Luta brädet (musens avstånd från mitten = lutning) |
-| Pilar / WASD | Vrid rattarna (lutningen ligger kvar när du släpper, som på riktigt) |
-| Mellanslag | Plant bräde |
-| R | Börja om |
-| P | Paus |
-| F1 | Visa vad AI:n "ser" (sensorer) |
-| F2 | Växla mus → autopilot → AI |
-| Esc | Avsluta |
+| Mouse | Tilt the board (the mouse's distance from the centre = tilt) |
+| Arrows / WASD | Turn the knobs (the tilt stays when you let go, like the real thing) |
+| Space | Level the board |
+| R | Restart |
+| P | Pause |
+| F1 | Show what the AI "sees" (its sensors) |
+| F2 | Switch mouse → autopilot → AI |
+| Esc | Quit |
 
-## Struktur
+## Project layout
 
 ```
 labyrint/
-  geometry.py      väggar (roterbara rektanglar), den svarta linjen (Path), rutnät
-  level.py         laddar och validerar banor från levels/*.json
-  levels/classic.json
-  game.py          fysikmotorn – LabyrinthGame (ingen grafik!)
-  render.py        pygame-grafik (läser bara spelet, ändrar det aldrig)
-  autopilot.py     handskriven regulator som följer linjen – riktmärke för AI:n
-  env.py           Gymnasium-miljön "Labyrint-v0" – API:t för AI:n
-  agent.py         låter en tränad modell styra spelet (NeuralPilot)
-  vecenv.py        kör många miljöer per process – snabbare träning
-models/            färdigtränad AI (labyrint_ai.zip)
-play.py            spela själv
-train.py           träna AI:n
-dashboard.py       grafer över en träning, live
-spela_ai.bat       dubbelklicka: titta på den tränade AI:n
-trana_ai_live.bat  dubbelklicka: träna en ny AI och se den lära sig live
+  geometry.py      walls (rotatable rectangles), the black guide line (Path), spatial grid
+  level.py         loads and validates levels from levels/*.json
+  levels/          the levels: classic.json and pinnar.json
+  game.py          the physics engine - LabyrinthGame (no graphics!)
+  render.py        pygame graphics (only reads the game, never changes it)
+  lang.py          UI text in Swedish and English
+  autopilot.py     hand-written controller that follows the line - the benchmark for the AI
+  env.py           the Gymnasium environment "Labyrint-v0" - the AI's API
+  agent.py         lets a trained model control the game (NeuralPilot)
+  vecenv.py        runs many environments per process - faster training
+models/            a trained AI (labyrint_ai.zip)
+docs/              the pictures in this README
+play.py            play the game
+train.py           train the AI
+dashboard.py       live graphs of a training run
+spela_ai.bat       double-click: watch the trained AI ("spela" = play)
+trana_ai_live.bat  double-click: train a new AI and watch it learn live ("träna" = train)
 tests/             pytest
 ```
 
-**Fysik:** kulan rullar med a = 5/7 · g · sin(lutning) (massiv kula som rullar utan att
-glida), max lutning 3°, brädet vrids med begränsad hastighet (som rattarna), rullmotstånd,
-studs mot väggarna och en realistisk hålkant: när kulans mittpunkt passerar kanten tippar
-den in mot hålet. En snabb kula kan alltså sladda förbi ett hål, en långsam ramlar i.
+**Physics:** the ball rolls with a = 5/7 · g · sin(tilt) (a solid ball rolling without
+slipping), at most 3° of tilt, the board turns at a limited speed (like the knobs), rolling
+resistance, bounces off the walls, and a realistic hole rim: once the ball's centre passes
+the rim, it tips in towards the hole. A fast ball can skid past a hole, a slow one drops in.
 
-## API för AI-delen
+## Levels
 
-### Direkt mot motorn
+| Level | Description |
+|---|---|
+| `classic` | The first level: 23 holes, a spiral in towards FINISH. |
+| `pinnar` | The same level with 14 small pins along the edges, like on the wooden original ("pinnar" = pins). |
+
+On `classic` the holes along the edges sit 15–16 mm from the frame or wall. That leaves a
+1–2 mm channel where the ball can roll along the edge past the hole without falling in, and
+that is exactly how the trained AI sneaked around the level in 7 s. On `pinnar` a pin sits
+between each of those holes and the edge, which closes the channel: the ball has to go
+around the hole on the side of the line. In a random test, 0 of 14,000 attempts to sneak
+past the holes on the edge side got through, compared with more than half on `classic`.
+
+The AI still learns the level quickly, but it has to slalom around the holes instead of
+sneaking past them: a test run finished 100 % of its games from START after 2 M steps
+(about 2 minutes) and got down to 10.3 s after 8 M steps (about 9 minutes), compared with
+7 s on `classic`.
+
+The model in `models/` was trained on `classic`.
+
+## API for the AI
+
+### Directly against the engine
 
 ```python
 from labyrint import LabyrinthGame, Status
 
 game = LabyrinthGame("classic")
-game.reset()                         # eller reset(start_s=500) för att starta mitt på banan
+game.reset()                         # or reset(start_s=500) to start halfway along the line
 while game.status is Status.RUNNING:
-    game.step((0.2, -0.8))           # mållutning x, y i [-1, 1]; ett steg = 1/60 s
-print(game.state)                    # GameState: position, fart, lutning, framsteg, hål ...
+    game.step((0.2, -0.8))           # target tilt x, y in [-1, 1]; one step = 1/60 s
+print(game.state)                    # GameState: position, velocity, tilt, progress, holes ...
 
-snapshot = game.clone()              # billig kopia – för sökning/planering
+snapshot = game.clone()              # cheap copy - for search/planning
 ```
 
-### Gymnasium (för träning)
+### Gymnasium (for training)
 
 ```python
 import gymnasium as gym
-import labyrint                      # registrerar "Labyrint-v0"
+import labyrint                      # registers "Labyrint-v0"
 
-env = gym.make("Labyrint-v0", render_mode="human")   # eller None vid träning
+env = gym.make("Labyrint-v0", render_mode="human")   # or None when training
 obs, info = env.reset(seed=0)
 obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
 ```
 
-- **Handling:** 2 tal i [-1, 1] – brädets mållutning (x, y), 30 beslut per sekund.
-- **Observation:** 36 tal i [-1, 1]: kulans position/fart, lutning, linjen 15/40/80 mm
-  framåt, linjens riktning och avstånd till linjen, de 4 närmaste hålen,
-  avstånd till väggar i 8 riktningar och hur långt man kommit. (Tryck F1 i spelet så ser du dem.)
-- **Belöning:** +0,1 per mm framåt längs linjen (bakåt ger minus), −5 för hål,
-  +50 för mål, −0,01 per steg. Justeras via `RewardConfig`.
-- **Ingen parkering:** står kulan still (inga nya framsteg på 10 s, `stall_seconds`)
-  räknas det som att den ramlat. Utan den regeln lärde sig AI:n att gömma kulan i ett
-  hörn i stället för att våga sig förbi nästa hål.
-- **Läroplan (curriculum):** `random_start=0.5` gör att hälften av omgångarna startar på
-  en slumpvis punkt längs linjen, så AI:n får öva på slutet av banan tidigt.
-- **Bilder:** `render_mode="rgb_array"` ger brädet som bild om vi senare vill träna på pixlar (CNN).
+- **Action:** 2 numbers in [-1, 1], the board's target tilt (x, y), 30 decisions per second.
+- **Observation:** 36 numbers in [-1, 1]: the ball's position and velocity, the tilt, the line
+  15/40/80 mm ahead, the line's direction and the distance to it, the 4 nearest holes,
+  the distance to walls in 8 directions and how far along the level the ball is.
+  (Press F1 in the game to see them.)
+- **Reward:** +0.1 per mm forward along the line (backwards is negative), −5 for a hole,
+  +50 for the finish, −0.01 per step. Adjustable through `RewardConfig`.
+- **No parking:** if the ball stands still (no new progress for 10 s, `stall_seconds`), it
+  counts as a fall. Without that rule the AI learned to hide the ball in a corner instead of
+  daring to pass the next hole.
+- **Curriculum:** `random_start=0.5` starts half of the games at a random point along the
+  line, so the AI gets to practise the end of the level early.
+- **Pixels:** `render_mode="rgb_array"` returns the board as an image, for training on pixels (CNN) later.
 
-## Riktmärke
+## Benchmark
 
 ```powershell
 .venv\Scripts\python -m labyrint.autopilot --episodes 20
 ```
 
-Den handskrivna autopiloten klarar banan på ca 38 s. Den tränade AI:n (`models/labyrint_ai.zip`)
-klarar den på ca 7 s: i stället för att följa linjen åker den längs väggarna och rundar hålen
-på utsidan.
+The hand-written autopilot finishes both levels in about 38 s (add `--level pinnar`).
+The trained AI (`models/labyrint_ai.zip`) finishes `classic` in about 7 s: instead of
+following the line it rides along the walls and passes the holes on the outside. On
+`pinnar` it gets stuck against the pin at hole 2.
 
 ```powershell
-.venv\Scripts\python -m labyrint.agent --episodes 100 --jitter 5   # mät AI:n: 99 % i mål
+.venv\Scripts\python -m labyrint.agent --episodes 100 --jitter 5   # measure the AI: 99 % finish
 ```
 
-## Träna AI:n
+## Training the AI
 
 ```powershell
-# en gång: torch (med CUDA) och stable-baselines3 m.fl.
+# once: torch (with CUDA), stable-baselines3 and friends
 .venv\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
 .venv\Scripts\python -m pip install -r requirements-ai.txt
 
-.venv\Scripts\python train.py --name ppo        # ca 35 min för 30 M steg -> runs/ppo/best_model.zip
+.venv\Scripts\python train.py --name ppo --level pinnar   # about 35 min for 30 M steps -> runs/ppo/best_model.zip
 ```
 
-### Se AI:n träna live
+### Watch the AI train live
 
-Dubbelklicka **`trana_ai_live.bat`**. Den startar en ny träning och öppnar två fönster:
+Double-click **`trana_ai_live.bat`**. It starts a new training run on the level with pins and
+opens two windows:
 
-- **Spelet** (`play.py --live`): AI:n spelar med sin *senaste* hjärna. Träningen sparar en
-  ögonblicksbild var 3:e sekund och varje nytt försök använder den nyaste – man ser kulan gå
-  från att ramla direkt till att klara hela banan (efter ca 2–3 minuter).
-- **Graferna** (`dashboard.py`): andel i mål, tid till mål jämfört med autopiloten, belöning,
-  förlust (value loss), hur mycket den fortfarande slumpar (utforskning) och hur väl den
-  förutser sin belöning.
+- **The game** (`play.py --live`): the AI plays with its *latest* brain. The training saves a
+  snapshot every 3 seconds and every new attempt uses the newest one, so you can watch the
+  ball go from dropping straight into a hole to finishing the whole level (after about 2–3 minutes).
+- **The graphs** (`dashboard.py`): success rate, time to finish compared with the autopilot,
+  reward, value loss, how much it still explores, and how well it predicts its reward.
 
-Själva träningen spelar 64 omgångar samtidigt, ca 500 gånger snabbare än realtid, så det man
-ser i spelet är inte träningsomgångarna utan ett prov med den senaste versionen.
-Stäng träningsfönstret (det svarta) för att avbryta; de andra två kan stängas och öppnas fritt:
+![The training graphs from an 8 M step run on the level with pins](docs/training.png)
+
+The training itself plays 64 games at once, about 500 times faster than real time, so what
+you see in the game window is not the training games but a test of the latest version.
+Close the training window (the black one) to stop it. The other two can be closed and
+reopened at any time:
 
 ```powershell
-.venv\Scripts\python play.py --live          # följ den senaste körningen i runs/
-.venv\Scripts\python dashboard.py
+.venv\Scripts\python play.py --live --lang en      # follow the newest run in runs/
+.venv\Scripts\python dashboard.py --lang en
+.venv\Scripts\python dashboard.py runs/ppo --lang en --save training.png   # save the graphs as a picture
 ```
 
-## Tester
+To train on the old level: `trana_ai_live.bat --level classic`. The game, the graphs and
+`play.py --ai runs/<name>/best_model.zip` work out which level a run trained on by themselves
+(from `runs/<name>/args.json`). The windows the batch file opens use Swedish; start them
+yourself with `--lang en` for English.
+
+## Tests
 
 ```powershell
 .venv\Scripts\python -m pytest
 ```
 
-## Nästa steg
+## Next steps
 
-1. Välj bästa modell på prov med större startspridning – nu väljs den snabbaste, inte den stabilaste.
-2. Fler och svårare banor; träna en AI som klarar banor den aldrig sett.
-3. Träna på pixlar (`render_mode="rgb_array"`) i stället för sensorvärden.
+1. Pick the best model from tests with a larger start spread. Right now the fastest model wins, not the most reliable one.
+2. More and harder levels; train an AI that can play levels it has never seen.
+3. Train on pixels (`render_mode="rgb_array"`) instead of sensor values.
